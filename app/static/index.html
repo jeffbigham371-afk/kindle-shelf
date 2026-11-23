@@ -98,6 +98,9 @@
   .users { border-collapse: collapse; width: 100%; font-size: 14px; }
   code { background: var(--accent-soft); padding: 1px 6px; border-radius: 4px; overflow-wrap: anywhere; }
   @media (max-width: 560px) { .brand { font-size: 17px; } nav a { padding: 5px 8px; font-size: 14px; } .bar { gap: 6px; padding: 10px 12px; } .brand .ico { display: none; } }
+  @media (max-width: 460px) { .bar { flex-wrap: wrap; } .brand { width: 100%; } nav { width: 100%; justify-content: space-between; } }
+  .pill { font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+  .pill.done { border-color: var(--ok); color: var(--ok); } .pill.error { border-color: var(--err); color: var(--err); }
 </style>
 </head>
 <body>
@@ -106,6 +109,7 @@
   <nav>
     <a href="#/" data-v="shelf">Shelf</a>
     <a href="#/add" data-v="add">Add books</a>
+    <a href="#/audio" data-v="audio">Audiobooks</a>
     <a href="#/settings" data-v="settings">Settings</a>
   </nav>
 </div></header>
@@ -365,6 +369,81 @@ function renderAdd() {
   };
 }
 
+// ---------------------------------------------------------------- audiobooks
+let audioTimer = null;
+function fmtSize(b) { return b ? (b > 1e9 ? (b / 1e9).toFixed(1) + " GB" : Math.round(b / 1e6) + " MB") : ""; }
+async function renderAudio() {
+  $("#view").innerHTML = `
+    <div class="card">
+      <h2>Find a free audiobook</h2>
+      <p class="muted" style="margin-top:-6px">Search LibriVox and the Internet Archive's free audiobooks (public-domain classics read by volunteers). Downloads go straight into Audiobookshelf.</p>
+      <form id="aSearch" class="row"><input type="search" id="aq" class="grow" placeholder="Title or author, e.g. Sherlock Holmes" required><button class="btn">Search</button></form>
+      <div id="aResults" class="results"></div>
+    </div>
+    <div class="card">
+      <h2>Upload an audiobook you have</h2>
+      <p class="muted" style="margin-top:-6px">DRM-free files only, e.g. from Libro.fm or Downpour: MP3, M4B, M4A, FLAC, OGG, or one ZIP. Pick all the files for one book at once.</p>
+      <form id="aUpload" class="form-grid">
+        <label>Title<input type="text" name="title" required></label>
+        <label>Author<input type="text" name="author"></label>
+        <label>Narrator (optional)<input type="text" name="narrator"></label>
+        <label>Files<input type="file" name="files" multiple required accept=".mp3,.m4b,.m4a,.aac,.flac,.ogg,.opus,.wma,.wav,.zip,.jpg,.jpeg,.png"></label>
+        <div class="full"><button class="btn">Upload</button></div>
+      </form>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">Recent audiobook downloads</h2><span id="absLink"></span></div>
+      <div id="aList" class="results"></div>
+    </div>`;
+  $("#aSearch").onsubmit = async e => {
+    e.preventDefault();
+    const box = $("#aResults"); box.innerHTML = '<div class="muted">Searching…</div>';
+    try {
+      const data = await api("/api/audiobooks/search?q=" + encodeURIComponent($("#aq").value));
+      if (!data.results.length) { box.innerHTML = '<div class="muted">No matches.</div>'; return; }
+      box.innerHTML = data.results.map(r => `<div class="result">
+        <img src="${esc(r.cover)}" alt="" loading="lazy">
+        <div class="grow"><div class="t">${esc(r.title)}</div>
+          <div class="muted" style="font-size:13px">${esc(r.author || "Unknown author")} · ${r.librivox ? "LibriVox" : "Internet Archive"} · <a href="${esc(r.page)}" target="_blank" rel="noopener">listen to a sample</a></div></div>
+        ${r.in_library ? `<span class="pill done">Downloaded</span>` : `<button class="btn" data-a="${esc(r.id)}">Download</button>`}</div>`).join("");
+      box.querySelectorAll("[data-a]").forEach(btn => btn.onclick = async () => {
+        btn.disabled = true; btn.textContent = "Starting…";
+        try { const r = await api("/api/audiobooks", { method: "POST", json: { identifier: btn.dataset.a } });
+              btn.textContent = r.existing ? "Already have it" : "Downloading"; drawAudioList(); }
+        catch (err) { toast(err.message); btn.disabled = false; btn.textContent = "Download"; }
+      });
+    } catch (err) { box.innerHTML = `<div class="muted">${esc(err.message)}</div>`; }
+  };
+  $("#aUpload").onsubmit = async e => {
+    e.preventDefault();
+    const btn = e.target.querySelector("button"); btn.disabled = true; btn.textContent = "Uploading… (large files take a while)";
+    try { await api("/api/audiobooks/upload", { method: "POST", body: new FormData(e.target) }); e.target.reset(); toast("Uploaded"); drawAudioList(); }
+    catch (err) { toast(err.message); }
+    finally { btn.disabled = false; btn.textContent = "Upload"; }
+  };
+  drawAudioList();
+  clearInterval(audioTimer);
+  audioTimer = setInterval(() => { if (current === "audio") drawAudioList(); else clearInterval(audioTimer); }, 4000);
+}
+async function drawAudioList() {
+  const data = await api("/api/audiobooks");
+  if (!$("#aList")) return;
+  $("#absLink").innerHTML = data.abs_url ? `<a class="btn quiet" href="${esc(data.abs_url)}" target="_blank" rel="noopener">Open Audiobookshelf ↗</a>` : "";
+  if (!data.items.length) { $("#aList").innerHTML = '<div class="muted">Nothing yet.</div>'; return; }
+  $("#aList").innerHTML = data.items.slice(0, 30).map(a => {
+    const canDel = me.is_admin || a.added_by_id === me.id;
+    return `<div class="result"><div class="grow">
+      <div class="t">${esc(a.title || "Looking up…")} <span class="pill ${a.status}">${a.status === "done" ? "ready" : a.status}</span></div>
+      <div class="muted" style="font-size:13px">${esc([a.author, a.narrator && "read by " + a.narrator, a.file_count && a.file_count + " file" + (a.file_count > 1 ? "s" : ""), fmtSize(a.size), a.added_by && "added by " + a.added_by].filter(Boolean).join(" · "))}</div>
+      <div style="font-size:13px;color:${a.status === "error" ? "var(--err)" : "var(--muted)"}">${esc(a.message || "")}</div>
+      ${me.is_admin && a.path ? `<div class="meta-line"><code>${esc(a.path)}</code></div>` : ""}</div>
+      ${canDel && !["queued","downloading"].includes(a.status) ? `<button class="btn quiet" data-forget="${a.id}" title="Remove from this list (files stay in Audiobookshelf)">✕</button>` : ""}</div>`;
+  }).join("");
+  $("#aList").querySelectorAll("[data-forget]").forEach(b => b.onclick = async () => {
+    try { await api(`/api/audiobooks/${b.dataset.forget}`, { method: "DELETE" }); drawAudioList(); } catch (err) { toast(err.message); }
+  });
+}
+
 // ---------------------------------------------------------------- settings
 async function renderSettings() {
   $("#view").innerHTML = `
@@ -409,7 +488,7 @@ async function renderSettings() {
 }
 
 async function renderAdmin() {
-  const [users, mail] = await Promise.all([api("/api/users"), api("/api/settings/email")]);
+  const [users, mail, aud] = await Promise.all([api("/api/users"), api("/api/settings/email"), api("/api/settings/audio")]);
   $("#admin").innerHTML = `
     <div class="card">
       <h2>People</h2>
@@ -443,6 +522,20 @@ async function renderAdmin() {
       </form>
     </div>
     <div class="card">
+      <h2>Audiobookshelf</h2>
+      <p class="muted" style="margin-top:-6px">Audiobooks are saved as <code>Author\\Title\\</code> inside this folder. Use the folder your Audiobookshelf library already watches (Audiobookshelf → Settings → Libraries → edit → Folders).</p>
+      <form id="audForm" class="form-grid">
+        <label class="full">Audiobook folder on this server<input type="text" name="audiobook_dir" value="${esc(aud.audiobook_dir || "")}" placeholder="D:\\Audiobooks"></label>
+        <label>Download quality<select name="audio_quality">
+          <option value="small" ${aud.audio_quality === "small" ? "selected" : ""}>Smaller files (64 kbps, fine for speech)</option>
+          <option value="high" ${aud.audio_quality === "high" ? "selected" : ""}>Higher quality (bigger files)</option></select></label>
+        <label>Audiobookshelf address (optional)<input type="url" name="abs_url" value="${esc(aud.abs_url || "")}" placeholder="http://localhost:13378"></label>
+        <label class="full">API key (optional, makes new books appear instantly)${aud.has_token ? " (saved; leave blank to keep)" : ""}
+          <input type="password" name="abs_token" autocomplete="off" placeholder="Audiobookshelf → Settings → Users → your user → API token"></label>
+        <div class="full row"><button class="btn">Save</button><button type="button" class="btn quiet" id="testAbs">Test connection</button></div>
+      </form>
+    </div>
+    <div class="card">
       <h3>Where the library lives</h3>
       <p class="muted">Books are kept on this server in <code>${esc(cfg.library_dir)}</code>, one folder per author and title. Back up that folder plus the <code>kindle-shelf.db</code> file next to it.</p>
     </div>`;
@@ -466,6 +559,16 @@ async function renderAdmin() {
           cfg = await api("/api/config"); toast("Saved"); }
     catch (err) { toast(err.message); }
   };
+  $("#audForm").onsubmit = async e => {
+    e.preventDefault();
+    try { await api("/api/settings/audio", { method: "PUT", json: Object.fromEntries(new FormData(e.target)) }); toast("Saved"); renderAdmin(); }
+    catch (err) { toast(err.message); }
+  };
+  $("#testAbs").onclick = async () => {
+    try { const r = await api("/api/settings/audio/test", { method: "POST" });
+          toast("Connected. Libraries: " + r.libraries.map(l => l.name + " (" + l.folders.join(", ") + ")").join("; ")); }
+    catch (err) { toast(err.message); }
+  };
   $("#testMail").onclick = async e => {
     e.target.disabled = true; e.target.textContent = "Sending…";
     try { const r = await api("/api/settings/email/test", { method: "POST" }); toast("Test email sent to " + r.to); }
@@ -478,11 +581,11 @@ async function renderAdmin() {
 let current = "";
 function route() {
   const h = location.hash || "#/";
-  const view = h.startsWith("#/add") ? "add" : h.startsWith("#/settings") ? "settings" : "shelf";
+  const view = h.startsWith("#/add") ? "add" : h.startsWith("#/audio") ? "audio" : h.startsWith("#/settings") ? "settings" : "shelf";
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.v === view));
   if (view !== current) {
     current = view; $("#view").innerHTML = "";
-    if (view === "add") renderAdd(); else if (view === "settings") renderSettings(); else renderShelf();
+    if (view === "add") renderAdd(); else if (view === "audio") renderAudio(); else if (view === "settings") renderSettings(); else renderShelf();
   }
   if (h.startsWith("#/book/")) renderBook(h.slice(7)); else { $("#sheet").innerHTML = ""; editing = false; shown = ""; }
 }

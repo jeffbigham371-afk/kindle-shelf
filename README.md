@@ -8,6 +8,7 @@ A self-hosted home ebook library. Books are stored on your server, and each pers
 - **Adding books**: search free Project Gutenberg classics, upload files, paste a link, or drop files in the server's **import folder**
 - **Book pages** with description and series, plus editing of titles, authors, and covers (saved into the book files too)
 - **Kindle browser page** at `/kindle`: tap a title on the Kindle to download it directly
+- **Audiobooks for Audiobookshelf**: search free LibriVox and Internet Archive audiobooks, or upload DRM-free MP3/M4B files. They're saved into your Audiobookshelf library folder as `Author/Title/` with `cover.jpg`, `desc.txt` and `reader.txt`.
 
 ### Where the library lives
 Everything stays on the server:
@@ -28,6 +29,11 @@ If `APP_PASSWORD` is set, an admin account is created from `APP_USER` / `APP_PAS
 - set up the email account the library sends from (Gmail works with an app password), then click **Send a test email**
 
 Each person then enters their Kindle email under **Settings**. In their Amazon account, they add the library's sending address to the **Approved Personal Document E-mail List**.
+
+### Audiobooks
+As admin, open **Settings → Audiobookshelf** and set **Audiobook folder** to the folder your Audiobookshelf library already watches. Audiobookshelf picks new books up on its own. For new books to appear instantly, also enter the Audiobookshelf address and an API token (Audiobookshelf → Settings → Users → your user). Each download is assembled in a staging folder and moved in only when complete, so Audiobookshelf never sees a half-downloaded book.
+
+If that folder is a network share on another machine, use its UNC path (`\\nas\audiobooks`). The account running Kindle Shelf must be allowed to write there. The built-in SYSTEM account usually can't reach network shares.
 
 ## Install
 

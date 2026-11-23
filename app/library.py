@@ -56,7 +56,8 @@ _fs_lock = threading.Lock()  # serialises folder creation / moves inside the lib
 # ---------------------------------------------------------------- helpers
 
 def safe_name(s, fallback="Untitled", limit=80):
-    s = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", s or "")  # illegal on Windows
+    s = re.sub(r'[:/\\|]', " ", s or "")  # separators -> space
+    s = re.sub(r'[<>"?*\x00-\x1f]', "", s)  # other characters Windows forbids
     s = re.sub(r"\s+", " ", s).strip().rstrip(". ")
     return s[:limit].rstrip(". ") or fallback
 

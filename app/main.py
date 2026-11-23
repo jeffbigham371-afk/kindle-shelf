@@ -11,13 +11,14 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
-from . import auth, db, library
+from . import audio, auth, db, library
 from .auth import admin_user, current_user
 from .config import (
     GUTENDEX, IMPORT_DIR, INCOMING, INPUT_EXTS, LIBRARY, OUTPUT_FORMATS, OUTPUT_PROFILE, USER_AGENT,
 )
 
 db.migrate()
+audio.migrate()
 auth.bootstrap_admin()
 
 app = FastAPI(title="Kindle Shelf")
@@ -525,6 +526,125 @@ def book_file(book_id: str, fmt: str, user=Depends(current_user)):
     path = library.book_dir(b) / b["files"][fmt]
     media = {"epub": "application/epub+zip", "azw3": "application/vnd.amazon.ebook"}.get(fmt)
     return FileResponse(path, filename=path.name, media_type=media)
+
+
+# ---------------------------------------------------------------- audiobooks
+
+class AudioSettings(BaseModel):
+    audiobook_dir: str | None = None
+    abs_url: str | None = None
+    abs_token: str | None = None  # empty = keep the saved one
+    audio_quality: str | None = None
+
+
+class AudioAdd(BaseModel):
+    identifier: str
+
+
+def present_audio(a, names):
+    return {k: a.get(k) for k in ("id", "status", "message", "title", "author", "narrator",
+                                  "file_count", "size", "created", "source")} | \
+        {"added_by": names.get(a.get("added_by")), "added_by_id": a.get("added_by"), "path": a.get("path")}
+
+
+@app.get("/api/audiobooks")
+def audiobooks(user=Depends(current_user)):
+    names = user_names()
+    s = audio.settings()
+    return {"items": [present_audio(a, names) for a in audio.list_all()],
+            "abs_url": s["abs_url"], "folder": s["audiobook_dir"] if user["is_admin"] else None}
+
+
+@app.get("/api/audiobooks/search")
+def audiobook_search(q: str, page: int = 1, user=Depends(current_user)):
+    try:
+        return audio.search(q, page)
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Couldn't reach the Internet Archive: {e}")
+
+
+@app.post("/api/audiobooks")
+def audiobook_add(req: AudioAdd, user=Depends(current_user)):
+    try:
+        aid, existing = audio.queue_archive(req.identifier, user)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"id": aid, "existing": existing}
+
+
+@app.post("/api/audiobooks/upload")
+async def audiobook_upload(files: list[UploadFile] = File(...), title: str = Form(...),
+                           author: str = Form(""), narrator: str = Form(""), user=Depends(current_user)):
+    if not title.strip():
+        raise HTTPException(400, "Please enter the title")
+    tmp = INCOMING / ("audio-upload-" + library.uuid.uuid4().hex[:8])
+    tmp.mkdir(parents=True, exist_ok=True)
+    saved = []
+    for f in files:
+        ext = Path(f.filename or "").suffix.lower()
+        if ext not in audio.AUDIO_EXTS | audio.IMAGE_EXTS | {".zip"}:
+            shutil.rmtree(tmp, ignore_errors=True)
+            raise HTTPException(400, f"Can't use '{f.filename}'. Use MP3, M4B, M4A, FLAC, OGG or a ZIP of them.")
+        dest = tmp / (library.safe_name(Path(f.filename).stem, "file", 150) + ext)
+        with open(dest, "wb") as out:
+            shutil.copyfileobj(f.file, out)
+        saved.append(str(dest))
+    aid = audio.queue_upload(saved, title.strip(), author.strip() or None, narrator.strip() or None, user)
+    return {"id": aid}
+
+
+@app.delete("/api/audiobooks/{aid}")
+def audiobook_forget(aid: str, user=Depends(current_user)):
+    a = audio.get(aid)
+    if not a:
+        raise HTTPException(404)
+    if a["status"] in ("queued", "downloading"):
+        raise HTTPException(409, "Still downloading")
+    if not user["is_admin"] and a.get("added_by") != user["id"]:
+        raise HTTPException(403, "Only an admin or the person who added it can remove this")
+    db.x("DELETE FROM audiobooks WHERE id=?", (aid,))
+    return {"ok": True}
+
+
+@app.get("/api/settings/audio")
+def get_audio_settings(_=Depends(admin_user)):
+    s = audio.settings()
+    return {**s, "abs_token": "", "has_token": bool(s["abs_token"])}
+
+
+@app.put("/api/settings/audio")
+def save_audio_settings(req: AudioSettings, _=Depends(admin_user)):
+    data = req.model_dump()
+    if data.get("audiobook_dir"):
+        try:
+            data["audiobook_dir"] = audio.check_dir(data["audiobook_dir"].strip())
+        except OSError as e:
+            raise HTTPException(400, f"Can't write to that folder: {e}")
+    if data.get("audio_quality") not in (None, "small", "high"):
+        raise HTTPException(400, "Unknown quality")
+    for k, v in data.items():
+        if k == "abs_token" and not v:
+            continue
+        if v is not None:
+            db.set_setting(k, v.strip())
+    return get_audio_settings()
+
+
+@app.post("/api/settings/audio/test")
+def test_abs(_=Depends(admin_user)):
+    s = audio.settings()
+    if not (s["abs_url"] and s["abs_token"]):
+        raise HTTPException(400, "Enter the Audiobookshelf address and API key first")
+    try:
+        r = httpx.get(s["abs_url"].rstrip("/") + "/api/libraries", timeout=15,
+                      headers={"Authorization": f"Bearer {s['abs_token']}"})
+        r.raise_for_status()
+        libs = r.json().get("libraries", [])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Couldn't connect to Audiobookshelf: {e}")
+    return {"libraries": [{"name": l.get("name"), "folders": [f.get("fullPath") for f in l.get("folders", [])]}
+                          for l in libs]}
+
 
 
 @app.exception_handler(HTTPException)
