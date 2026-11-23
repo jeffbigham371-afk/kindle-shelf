@@ -1,6 +1,7 @@
 """Kindle Shelf: a home ebook library that sends books to your Kindle."""
 
 import html
+import re
 import shutil
 import time
 from pathlib import Path
@@ -11,7 +12,7 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Upload
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from pydantic import BaseModel
 
-from . import audio, auth, db, library
+from . import audio, auth, db, library, sources
 from .auth import admin_user, current_user
 from .config import (
     GUTENDEX, IMPORT_DIR, INCOMING, INPUT_EXTS, LIBRARY, OUTPUT_FORMATS, OUTPUT_PROFILE, USER_AGENT,
@@ -19,6 +20,7 @@ from .config import (
 
 db.migrate()
 audio.migrate()
+sources.migrate()
 auth.bootstrap_admin()
 
 app = FastAPI(title="Kindle Shelf")
@@ -274,6 +276,7 @@ def config(user=Depends(current_user)):
     return {
         "email_ready": library.email_ready(),
         "send_from": library.smtp_settings()["smtp_from"],
+        "libby_lookup": sources.prefs()["libby_lookup"],
         "formats": OUTPUT_FORMATS,
         "profile": OUTPUT_PROFILE,
         "calibre": shutil.which("ebook-convert") is not None,
@@ -645,6 +648,124 @@ def test_abs(_=Depends(admin_user)):
     return {"libraries": [{"name": l.get("name"), "folders": [f.get("fullPath") for f in l.get("folders", [])]}
                           for l in libs]}
 
+
+
+# ---------------------------------------------------------------- unified search
+
+@app.get("/api/find")
+def find(q: str, user=Depends(current_user)):
+    if len(q.strip()) < 2:
+        raise HTTPException(400, "Type at least 2 letters")
+    return sources.find(q, user)
+
+
+class LibraryIn(BaseModel):
+    name: str
+    libby: str  # link or key
+    kind: str   # card | free | paid
+    fee: str | None = None
+    note: str | None = None
+    url: str | None = None
+
+
+def _library_fields(req: LibraryIn):
+    if req.kind not in ("card", "free", "paid"):
+        raise HTTPException(400, "Choose: have a card, free card, or paid card")
+    key = sources.parse_libby_key(req.libby)
+    if not key:
+        raise HTTPException(400, "Paste the library's Libby link, e.g. https://libbyapp.com/library/yourlibrary")
+    name = req.name.strip()
+    if sources.prefs()["libby_lookup"]:
+        try:
+            real = sources.verify_libby_key(key)
+        except httpx.HTTPError:
+            real = "?"
+        if real is None:
+            raise HTTPException(400, f"Libby doesn't know a library called '{key}'. Check the link.")
+        if not name and real != "?":
+            name = real
+    return {"name": name or key, "libby_key": key, "kind": req.kind, "fee": (req.fee or "").strip() or None,
+            "note": (req.note or "").strip() or None, "url": (req.url or "").strip() or None}
+
+
+@app.get("/api/libraries")
+def get_libraries(user=Depends(current_user)):
+    return {"libraries": sources.libraries(), "suggestions": sources.SUGGESTIONS, "prefs": sources.prefs()}
+
+
+@app.post("/api/libraries")
+def add_library(req: LibraryIn, user=Depends(current_user)):
+    f = _library_fields(req)
+    if db.q("SELECT 1 FROM libraries WHERE libby_key=?", (f["libby_key"],), one=True):
+        raise HTTPException(400, "That library is already on the list")
+    db.x("INSERT INTO libraries (name, libby_key, kind, fee, note, url, created) VALUES (?,?,?,?,?,?,?)",
+         (*f.values(), time.time()))
+    return get_libraries(user)
+
+
+@app.put("/api/libraries/{lid}")
+def edit_library(lid: int, req: LibraryIn, user=Depends(current_user)):
+    f = _library_fields(req)
+    db.x("UPDATE libraries SET name=?, libby_key=?, kind=?, fee=?, note=?, url=? WHERE id=?", (*f.values(), lid))
+    return get_libraries(user)
+
+
+@app.delete("/api/libraries/{lid}")
+def delete_library(lid: int, user=Depends(current_user)):
+    db.x("DELETE FROM libraries WHERE id=?", (lid,))
+    return get_libraries(user)
+
+
+class SearchPrefs(BaseModel):
+    home_state: str | None = None
+    wait_ok_days: int | None = None
+    libby_lookup: bool | None = None
+
+
+@app.put("/api/search-prefs")
+def save_search_prefs(req: SearchPrefs, user=Depends(current_user)):
+    if req.home_state is not None:
+        st = req.home_state.strip().upper()
+        if st and not re.fullmatch(r"[A-Z]{2}", st):
+            raise HTTPException(400, "Use the two-letter state code, e.g. NV")
+        db.set_setting("home_state", st)
+    if req.wait_ok_days is not None:
+        db.set_setting("wait_ok_days", max(0, min(365, req.wait_ok_days)))
+    if req.libby_lookup is not None:
+        if not user["is_admin"]:
+            raise HTTPException(403, "Only an admin can change this")
+        db.set_setting("libby_lookup", "1" if req.libby_lookup else "0")
+    return sources.prefs()
+
+
+@app.get("/api/owned")
+def owned_summary(user=Depends(current_user)):
+    return {"counts": db.q("SELECT source, kind, COUNT(*) AS n FROM owned_items GROUP BY source, kind")}
+
+
+@app.post("/api/owned/import")
+async def owned_import(file: UploadFile = File(...), source: str = Form(...), user=Depends(current_user)):
+    kinds = {"kindle": "ebook", "audible": "audiobook", "other-ebook": "ebook", "other-audio": "audiobook"}
+    if source not in kinds:
+        raise HTTPException(400, "Unknown source")
+    data = await file.read()
+    if len(data) > 200 * 1024 * 1024:
+        raise HTTPException(400, "That file is too big")
+    try:
+        res = sources.import_owned(file.filename or "list.txt", data,
+                                   source if source in ("kindle", "audible") else "other", kinds[source])
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Couldn't read that file: {e}")
+    if not res["found"]:
+        raise HTTPException(400, "No book titles found in that file. Try the CSV from Amazon's data download, "
+                                 "or a text file with one 'Title by Author' per line.")
+    return res
+
+
+@app.delete("/api/owned")
+def owned_clear(source: str, user=Depends(admin_user)):
+    db.x("DELETE FROM owned_items WHERE source=?", (source,))
+    return owned_summary(user)
 
 
 @app.exception_handler(HTTPException)

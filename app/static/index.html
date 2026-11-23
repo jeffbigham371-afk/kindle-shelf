@@ -101,15 +101,43 @@
   @media (max-width: 460px) { .bar { flex-wrap: wrap; } .brand { width: 100%; } nav { width: 100%; justify-content: space-between; } }
   .pill { font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
   .pill.done { border-color: var(--ok); color: var(--ok); } .pill.error { border-color: var(--err); color: var(--err); }
+  /* Search */
+  .hero { max-width: 720px; margin: 6vh auto 26px; text-align: center; }
+  .hero.top { margin-top: 0; }
+  .hero h1 { font-family: Georgia, serif; font-weight: 600; font-size: 30px; margin: 0 0 14px; }
+  .hero form { display: flex; gap: 8px; }
+  .hero input { flex: 1; font-size: 18px !important; padding: 13px 16px !important; border-radius: 12px !important; background: var(--card) !important; }
+  .hero .btn { border-radius: 12px; padding: 0 22px; font-size: 16px; }
+  .hits { max-width: 820px; margin: 0 auto; display: grid; gap: 14px; }
+  .hit { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: grid; grid-template-columns: 72px 1fr; gap: 16px; }
+  .hit .cover { width: 72px; }
+  .hit h3 { font-family: Georgia, serif; font-size: 19px; margin: 0; line-height: 1.25; }
+  .hit .by { color: var(--muted); margin-bottom: 8px; }
+  .fmt { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 10px; }
+  .fmt:first-of-type { border-top: 0; padding-top: 0; }
+  .fmt-h { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px; }
+  .best { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .tier { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); }
+  .tier.t1 { background: #e3efe7; color: #23583e; } .tier.t2 { background: #e6edf6; color: #2b4a73; }
+  @media (prefers-color-scheme: dark) { .tier.t1 { background: #1f3a2c; color: #9fd8b9; } .tier.t2 { background: #1f2c3e; color: #a9c3e6; } }
+  .opt { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 14px; margin-top: 6px; }
+  .opt .src { color: var(--muted); }
+  .small-links { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .small-links a { font-size: 13px; padding: 3px 10px; border: 1px solid var(--line); border-radius: 99px; text-decoration: none; color: var(--text); }
+  .small-links a .k { color: var(--muted); }
+  .srcs { max-width: 820px; margin: 14px auto 0; font-size: 12px; color: var(--muted); text-align: center; }
+  .warn { border: 1px solid var(--err); border-radius: 10px; padding: 12px 14px; color: var(--text); background: transparent; }
+  .warn b { color: var(--err); }
+  @media (max-width: 520px) { .hit { grid-template-columns: 52px 1fr; gap: 12px; } .hit .cover { width: 52px; } .hero h1 { font-size: 24px; } }
 </style>
 </head>
 <body>
 <header><div class="bar">
   <div class="brand"><span class="ico">📚 </span>Our Library</div>
   <nav>
-    <a href="#/" data-v="shelf">Shelf</a>
-    <a href="#/add" data-v="add">Add books</a>
-    <a href="#/audio" data-v="audio">Audiobooks</a>
+    <a href="#/" data-v="search">Search</a>
+    <a href="#/shelf" data-v="shelf">Shelf</a>
+    <a href="#/add" data-v="add">Add</a>
     <a href="#/settings" data-v="settings">Settings</a>
   </nav>
 </div></header>
@@ -190,7 +218,7 @@ function drawShelf() {
   $("#filters").innerHTML = F.map(([k, l]) => `<button class="chip ${filter === k ? "on" : ""}" data-f="${k}">${l} <span class="muted">${counts[k]}</span></button>`).join("");
   $("#filters").querySelectorAll(".chip").forEach(c => c.onclick = () => { filter = c.dataset.f; save("filter", filter); drawShelf(); });
   const list = visibleBooks();
-  if (!books.length) { $("#shelf").innerHTML = `<div class="empty">The shelf is empty.<br><br><a class="btn" href="#/add">Add your first book</a></div>`; return; }
+  if (!books.length) { $("#shelf").innerHTML = `<div class="empty">The shelf is empty.<br><br><a class="btn" href="#/">Search for a book</a></div>`; return; }
   if (!list.length) { $("#shelf").innerHTML = `<div class="empty">No books match.</div>`; return; }
   $("#shelf").innerHTML = `<div class="shelf">${list.map(b => {
     const badge = b.status === "error" ? '<span class="badge">Problem</span>'
@@ -298,20 +326,122 @@ function renderEdit(b) {
   };
 }
 
+// ---------------------------------------------------------------- search
+let lastSearch = null;
+const KIND_LABEL = { card: "your card", free: "free card", paid: "paid card" };
+function waitText(o) {
+  if (o.wait_days == null) return o.holds != null ? `${o.holds} people waiting` : "waitlist";
+  const w = Math.max(1, Math.round(o.wait_days / 7));
+  return `about ${w} week${w > 1 ? "s" : ""}` + (o.holds != null ? ` · ${o.holds} waiting` : "");
+}
+function renderSearch() {
+  const q = lastSearch?.query || "";
+  $("#view").innerHTML = `
+    <div class="hero ${q ? "top" : ""}">
+      ${q ? "" : `<h1>What would you like to read?</h1>`}
+      <form id="findForm"><input type="search" id="fq" placeholder="Search for a book or audiobook…" value="${esc(q)}" aria-label="Search" autofocus><button class="btn">Search</button></form>
+    </div>
+    <div id="hits" class="hits"></div><div id="srcs" class="srcs"></div>`;
+  $("#findForm").onsubmit = async e => {
+    e.preventDefault();
+    const q = $("#fq").value.trim(); if (q.length < 2) return;
+    $(".hero").classList.add("top"); $(".hero h1")?.remove();
+    $("#hits").innerHTML = `<div class="empty">Searching your library, free collections${cfg.libby_lookup ? " and Libby" : ""}…</div>`; $("#srcs").innerHTML = "";
+    try { lastSearch = await api("/api/find?q=" + encodeURIComponent(q)); drawHits(); }
+    catch (err) { $("#hits").innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+  };
+  if (lastSearch) drawHits();
+}
+function actionButton(o, big) {
+  const a = o.action || {}, cls = "btn" + (big ? "" : " quiet");
+  if (o.status === "owned" && a.type === "book") {
+    const can = me.kindle_email && cfg.email_ready;
+    return `${can ? `<button class="${cls}" data-send="${a.id}">Send to my Kindle</button>` : ""}<a class="btn quiet" href="#/book/${a.id}">Open</a>`;
+  }
+  if (a.type === "gutenberg") {
+    const can = me.kindle_email && cfg.email_ready;
+    return `<button class="${cls}" data-gut="${a.id}" data-send-too="${can ? 1 : 0}">${can ? "Add &amp; send to Kindle" : "Add to library"}</button>`;
+  }
+  if (a.type === "audio") return a.done ? `<span class="pill done">In Audiobookshelf</span>` : `<button class="${cls}" data-aud="${esc(a.id)}">Download to Audiobookshelf</button>`;
+  if (a.type === "link" && a.url) {
+    const label = o.status === "available" ? "Borrow in Libby" : o.status === "wait" ? "Place hold in Libby" : o.source === "Audiobookshelf" ? "Listen in Audiobookshelf"
+      : o.source === "Audible purchase" ? "Open in Audible" : o.source === "Kindle purchase" ? "On your Kindle (Amazon)" : "Open";
+    return `<a class="${cls}" href="${esc(a.url)}" target="_blank" rel="noopener">${label} ↗</a>`;
+  }
+  return "";
+}
+function optSource(o) {
+  const lib = o.library_kind ? ` (${KIND_LABEL[o.library_kind]}${o.library_kind === "paid" && o.fee ? ", " + esc(o.fee) : ""})` : "";
+  const note = o.kindle === false ? ` · <span style="color:var(--err)">not available for Kindle</span>` : "";
+  return `<span class="src">${esc(o.source)}${lib}${o.status === "available" ? " · available now" : ""}${note}</span>`;
+}
+function drawHits() {
+  const d = lastSearch, box = $("#hits");
+  const kindRank = { card: 0, free: 1, paid: 2 };
+  const checks = [...d.check_links].sort((a, b) => kindRank[a.kind] - kindRank[b.kind]);
+  const checkLinks = (list) => list.map(l => `<a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.name)} <span class="k">· ${KIND_LABEL[l.kind]}${l.kind === "paid" && l.fee ? ", " + esc(l.fee) : ""}</span></a>`).join("");
+  const cards = d.groups.map(g => {
+    const fmts = Object.entries(g.kinds).map(([kind, p]) => {
+      const head = `<div class="fmt-h">${kind === "ebook" ? "📖 Ebook" : "🎧 Audiobook"}</div>`;
+      let body = "";
+      if (p.best) {
+        body += `<div class="best"><span class="tier t${p.best.tier}">${esc(tierName(p.best))}</span>${optSource(p.best)}</div>
+                 <div class="opt">${actionButton(p.best, true)}</div>`;
+        if (p.also.length) body += p.also.map(o => `<div class="opt"><span class="muted">Also:</span> ${optSource(o)} ${actionButton(o, false)}</div>`).join("");
+      } else if (p.queues.length) {
+        body += `<div class="best"><span class="tier">Waitlist</span><span class="src">Shortest waits</span></div>`;
+        body += p.queues.map(o => `<div class="opt"><b>${esc(waitText(o))}</b> ${optSource(o)} ${actionButton(o, false)}</div>`).join("");
+      }
+      if (p.suggest_buy && p.buy.length) body += `<div class="opt"><span class="muted">${p.queues.length ? "Long wait. Or buy:" : "Buy:"}</span> ${p.buy.map(b => `<a class="btn quiet" href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.label)} ↗</a>`).join("")}</div>`;
+      return `<div class="fmt">${head}${body}</div>`;
+    }).join("");
+    const cover = g.cover ? `<div class="cover"><img src="${esc(g.cover)}" alt="" loading="lazy"></div>`
+      : `<div class="cover"><div class="fake" style="background:hsl(${hue(g.title)} 35% 38%)"><b style="font-size:10px">${esc(g.title)}</b></div></div>`;
+    const showChecks = !d.libby_lookup && checks.length && g.best_tier > 2;
+    return `<div class="hit">${cover}<div style="min-width:0"><h3>${esc(g.title)}</h3><div class="by">${esc(g.author || "")}</div>${fmts}
+      ${showChecks ? `<div class="small-links"><span class="muted" style="font-size:13px">Check Libby:</span>${checkLinks(checks)}</div>` : ""}</div></div>`;
+  }).join("");
+  const anyGood = d.groups.some(g => g.best_tier <= 2);
+  const fallback = `<div class="card" style="margin:0">
+      <h3>${d.groups.length ? (anyGood ? "Want a different edition?" : "Not in your library or the free collections?") : `Nothing for “${esc(d.query)}” in your library or the free collections.`}</h3>
+      ${checks.length ? `<p class="muted" style="margin:4px 0 6px">${d.libby_lookup ? "Open in Libby:" : "Check the libraries in Libby. It shows the wait time at each one:"}</p><div class="small-links">${checkLinks(checks)}</div>`
+        : `<p class="muted">Add your library cards in <a href="#/settings">Settings</a> to check Libby too.</p>`}
+      <p class="muted" style="margin:12px 0 6px">Or buy it:</p>
+      <div class="small-links">${d.buy.map(b => `<a href="${esc(b.url)}" target="_blank" rel="noopener">${esc(b.label)} ↗</a>`).join("")}</div>
+    </div>`;
+  box.innerHTML = cards + fallback;
+  const bad = Object.entries(d.sources).filter(([, v]) => v !== "ok");
+  $("#srcs").innerHTML = bad.length ? "Couldn't check: " + bad.map(([k, v]) => `${esc(k)} (${esc(v)})`).join(", ") : "";
+  box.querySelectorAll("[data-send]").forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = "Sending…";
+    try { await api(`/api/books/${b.dataset.send}/send`, { method: "POST" }); b.textContent = "Sent ✓"; toast("Sent! It'll be on your Kindle in a few minutes."); refresh(); }
+    catch (err) { toast(err.message); b.disabled = false; b.textContent = "Send to my Kindle"; }
+  });
+  box.querySelectorAll("[data-gut]").forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = "Adding…";
+    try { const r = await api("/api/books", { method: "POST", json: { gutenberg_id: +b.dataset.gut, send: b.dataset.sendToo === "1" } });
+          b.textContent = r.existing ? "Already on your shelf" : (b.dataset.sendToo === "1" ? "Added. Sending when ready ✓" : "Added ✓");
+          if (r.existing && b.dataset.sendToo === "1") { await api(`/api/books/${r.id}/send`, { method: "POST" }).catch(e => toast(e.message)); b.textContent = "Sent ✓"; }
+          refresh(); }
+    catch (err) { toast(err.message); b.disabled = false; b.textContent = "Add"; }
+  });
+  box.querySelectorAll("[data-aud]").forEach(b => b.onclick = async () => {
+    b.disabled = true; b.textContent = "Starting…";
+    try { await api("/api/audiobooks", { method: "POST", json: { identifier: b.dataset.aud } }); b.textContent = "Downloading. See Add page ✓"; }
+    catch (err) { toast(err.message); b.disabled = false; b.textContent = "Download to Audiobookshelf"; }
+  });
+}
+function tierName(o) {
+  return { 1: "You own it", 2: "Free", 3: "Your library", 4: "Free library card", 5: "Paid library card" }[o.tier] || "";
+}
+
 // ---------------------------------------------------------------- add books
 function renderAdd() {
   const sendDefault = me.auto_send && me.kindle_email && cfg.email_ready;
   const sendBox = `<label class="row muted" style="font-size:14px;width:100%"><input type="checkbox" class="sendChk" ${sendDefault ? "checked" : ""} ${me.kindle_email && cfg.email_ready ? "" : "disabled"}> Also send to my Kindle when it's ready</label>`;
   $("#view").innerHTML = `
     <div class="card">
-      <h2>Find a free classic</h2>
-      <p class="muted" style="margin-top:-6px">Search more than 70,000 free public-domain books from Project Gutenberg.</p>
-      <form id="searchForm" class="row"><input type="search" id="sq" class="grow" placeholder="Title or author, e.g. Jane Austen" required><button class="btn">Search</button></form>
-      <div class="row" style="margin-top:8px">${sendBox}</div>
-      <div id="results" class="results"></div>
-    </div>
-    <div class="card">
-      <h2>Upload a book you have</h2>
+      <h2>Upload an ebook you have</h2>
       <p class="muted" style="margin-top:-6px">EPUB, MOBI, AZW3, PDF, DOCX and more. It will be converted for Kindle.</p>
       <form id="uploadForm" class="row"><input type="file" id="file" class="grow" required multiple accept="${[".epub",".mobi",".azw",".azw3",".prc",".pdf",".fb2",".txt",".html",".htm",".docx",".rtf",".odt",".lit",".cbz",".cbr",".pdb"].join(",")}"><button class="btn">Upload</button>${sendBox}</form>
     </div>
@@ -322,27 +452,23 @@ function renderAdd() {
     </div>
     ${me.is_admin && cfg.import_dir ? `<div class="card"><h3>Import folder on the server</h3>
       <p class="muted">Copy ebook files into <code>${esc(cfg.import_dir)}</code> and they're added automatically within a minute.</p>
-      <button class="btn quiet" id="scan">Check the folder now</button></div>` : ""}`;
+      <button class="btn quiet" id="scan">Check the folder now</button></div>` : ""}
+    <div class="card">
+      <h2>Upload an audiobook you have</h2>
+      <p class="muted" style="margin-top:-6px">DRM-free files only, e.g. from Libro.fm or Downpour: MP3, M4B, M4A, FLAC, OGG, or one ZIP. Pick all the files for one book at once. It goes into Audiobookshelf.</p>
+      <form id="aUpload" class="form-grid">
+        <label>Title<input type="text" name="title" required></label>
+        <label>Author<input type="text" name="author"></label>
+        <label>Narrator (optional)<input type="text" name="narrator"></label>
+        <label>Files<input type="file" name="files" multiple required accept=".mp3,.m4b,.m4a,.aac,.flac,.ogg,.opus,.wma,.wav,.zip,.jpg,.jpeg,.png"></label>
+        <div class="full"><button class="btn">Upload</button></div>
+      </form>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">Audiobook downloads</h2><span id="absLink"></span></div>
+      <div id="aList" class="results"></div>
+    </div>`;
   const sendOf = form => form.querySelector(".sendChk")?.checked || false;
-  $("#searchForm").onsubmit = async e => {
-    e.preventDefault();
-    const box = $("#results"); box.innerHTML = '<div class="muted">Searching…</div>';
-    try {
-      const data = await api("/api/search?q=" + encodeURIComponent($("#sq").value));
-      if (!data.results.length) { box.innerHTML = '<div class="muted">No matches.</div>'; return; }
-      box.innerHTML = data.results.map(r => `<div class="result">
-        ${r.cover ? `<img src="${esc(r.cover)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
-        <div class="grow"><div class="t">${esc(r.title)}</div><div class="muted" style="font-size:13px">${esc(r.authors || "Unknown author")}</div></div>
-        ${r.in_library ? `<a class="btn quiet" href="#/book/${r.in_library}">On the shelf</a>`
-          : `<button class="btn" data-g="${r.id}" ${r.epub ? "" : "disabled"}>Add</button>`}</div>`).join("");
-      box.querySelectorAll("[data-g]").forEach(btn => btn.onclick = async () => {
-        btn.disabled = true; btn.textContent = "Adding…";
-        try { await api("/api/books", { method: "POST", json: { gutenberg_id: +btn.dataset.g, send: sendOf($("#searchForm").parentElement) } });
-              btn.textContent = "Added ✓"; toast("Added. It'll be on the shelf in a minute or two."); refresh(); }
-        catch (err) { toast(err.message); btn.disabled = false; btn.textContent = "Add"; }
-      });
-    } catch (err) { box.innerHTML = `<div class="muted">${esc(err.message)}</div>`; }
-  };
   $("#uploadForm").onsubmit = async e => {
     e.preventDefault();
     const btn = e.target.querySelector("button"); btn.disabled = true;
@@ -367,53 +493,6 @@ function renderAdd() {
     try { const r = await api("/api/import/scan", { method: "POST" }); toast(r.added ? `Found ${r.added} new book(s)` : "No new files in the folder"); refresh(); }
     catch (err) { toast(err.message); }
   };
-}
-
-// ---------------------------------------------------------------- audiobooks
-let audioTimer = null;
-function fmtSize(b) { return b ? (b > 1e9 ? (b / 1e9).toFixed(1) + " GB" : Math.round(b / 1e6) + " MB") : ""; }
-async function renderAudio() {
-  $("#view").innerHTML = `
-    <div class="card">
-      <h2>Find a free audiobook</h2>
-      <p class="muted" style="margin-top:-6px">Search LibriVox and the Internet Archive's free audiobooks (public-domain classics read by volunteers). Downloads go straight into Audiobookshelf.</p>
-      <form id="aSearch" class="row"><input type="search" id="aq" class="grow" placeholder="Title or author, e.g. Sherlock Holmes" required><button class="btn">Search</button></form>
-      <div id="aResults" class="results"></div>
-    </div>
-    <div class="card">
-      <h2>Upload an audiobook you have</h2>
-      <p class="muted" style="margin-top:-6px">DRM-free files only, e.g. from Libro.fm or Downpour: MP3, M4B, M4A, FLAC, OGG, or one ZIP. Pick all the files for one book at once.</p>
-      <form id="aUpload" class="form-grid">
-        <label>Title<input type="text" name="title" required></label>
-        <label>Author<input type="text" name="author"></label>
-        <label>Narrator (optional)<input type="text" name="narrator"></label>
-        <label>Files<input type="file" name="files" multiple required accept=".mp3,.m4b,.m4a,.aac,.flac,.ogg,.opus,.wma,.wav,.zip,.jpg,.jpeg,.png"></label>
-        <div class="full"><button class="btn">Upload</button></div>
-      </form>
-    </div>
-    <div class="card">
-      <div class="row" style="justify-content:space-between"><h2 style="margin:0">Recent audiobook downloads</h2><span id="absLink"></span></div>
-      <div id="aList" class="results"></div>
-    </div>`;
-  $("#aSearch").onsubmit = async e => {
-    e.preventDefault();
-    const box = $("#aResults"); box.innerHTML = '<div class="muted">Searching…</div>';
-    try {
-      const data = await api("/api/audiobooks/search?q=" + encodeURIComponent($("#aq").value));
-      if (!data.results.length) { box.innerHTML = '<div class="muted">No matches.</div>'; return; }
-      box.innerHTML = data.results.map(r => `<div class="result">
-        <img src="${esc(r.cover)}" alt="" loading="lazy">
-        <div class="grow"><div class="t">${esc(r.title)}</div>
-          <div class="muted" style="font-size:13px">${esc(r.author || "Unknown author")} · ${r.librivox ? "LibriVox" : "Internet Archive"} · <a href="${esc(r.page)}" target="_blank" rel="noopener">listen to a sample</a></div></div>
-        ${r.in_library ? `<span class="pill done">Downloaded</span>` : `<button class="btn" data-a="${esc(r.id)}">Download</button>`}</div>`).join("");
-      box.querySelectorAll("[data-a]").forEach(btn => btn.onclick = async () => {
-        btn.disabled = true; btn.textContent = "Starting…";
-        try { const r = await api("/api/audiobooks", { method: "POST", json: { identifier: btn.dataset.a } });
-              btn.textContent = r.existing ? "Already have it" : "Downloading"; drawAudioList(); }
-        catch (err) { toast(err.message); btn.disabled = false; btn.textContent = "Download"; }
-      });
-    } catch (err) { box.innerHTML = `<div class="muted">${esc(err.message)}</div>`; }
-  };
   $("#aUpload").onsubmit = async e => {
     e.preventDefault();
     const btn = e.target.querySelector("button"); btn.disabled = true; btn.textContent = "Uploading… (large files take a while)";
@@ -423,8 +502,12 @@ async function renderAudio() {
   };
   drawAudioList();
   clearInterval(audioTimer);
-  audioTimer = setInterval(() => { if (current === "audio") drawAudioList(); else clearInterval(audioTimer); }, 4000);
+  audioTimer = setInterval(() => { if (current === "add") drawAudioList(); else clearInterval(audioTimer); }, 5000);
 }
+
+// ---------------------------------------------------------------- audiobooks
+let audioTimer = null;
+function fmtSize(b) { return b ? (b > 1e9 ? (b / 1e9).toFixed(1) + " GB" : Math.round(b / 1e6) + " MB") : ""; }
 async function drawAudioList() {
   const data = await api("/api/audiobooks");
   if (!$("#aList")) return;
@@ -473,6 +556,8 @@ async function renderSettings() {
       <p class="muted">Open the Kindle's web browser and go to <code>${esc(location.origin)}/kindle</code>, log in, and tap any book to download it straight onto the Kindle. No email needed.</p>
       <a class="btn quiet" href="/logout">Log out</a>
     </div>
+    <div id="libs"></div>
+    <div id="owned"></div>
     <div id="admin"></div>`;
   $("#meForm").onsubmit = async e => {
     e.preventDefault(); const f = new FormData(e.target);
@@ -484,7 +569,120 @@ async function renderSettings() {
     try { await api("/api/me", { method: "PUT", json: { current_password: f.get("current"), new_password: f.get("new") } }); e.target.reset(); toast("Password changed"); }
     catch (err) { toast(err.message); }
   };
+  renderLibraries(); renderOwned();
   if (me.is_admin) renderAdmin();
+}
+
+// ---------------------------------------------------------------- settings: libraries
+const KIND_NAME = { card: "We have a card", free: "Free card we could get", paid: "Paid card we could buy" };
+async function renderLibraries() {
+  const d = await api("/api/libraries"), p = d.prefs;
+  $("#libs").innerHTML = `
+    <div class="card">
+      <h2>Libraries for Libby</h2>
+      <p class="muted" style="margin-top:-6px">Search checks these in order: libraries where you have a card, then free cards, then paid cards. We never store card numbers or Libby logins.</p>
+      ${d.libraries.length ? `<table class="users"><tr><th>Library</th><th>Type</th><th>Libby ID</th><th></th></tr>
+        ${d.libraries.map(l => `<tr><td>${esc(l.name)}${l.note ? `<div class="meta-line">${esc(l.note)}</div>` : ""}</td>
+          <td>${esc(KIND_NAME[l.kind])}${l.fee ? `<div class="meta-line">${esc(l.fee)}</div>` : ""}</td>
+          <td><a href="https://libbyapp.com/library/${esc(l.libby_key)}" target="_blank" rel="noopener">${esc(l.libby_key)}</a></td>
+          <td style="text-align:right"><button class="btn quiet" data-dellib="${l.id}">Remove</button></td></tr>`).join("")}</table>`
+        : `<p class="notice">No libraries yet. Start with your Washoe County card.</p>`}
+      <h3 style="margin-top:18px">Add a library</h3>
+      <form id="libForm" class="form-grid">
+        <label>Library name<input type="text" name="name" placeholder="Washoe County Library"></label>
+        <label>Type<select name="kind">${Object.entries(KIND_NAME).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select></label>
+        <label class="full">Libby link
+          <input type="text" name="libby" required placeholder="https://libbyapp.com/library/…"></label>
+        <div class="full meta-line">To find it, open <a href="https://libbyapp.com" target="_blank" rel="noopener">libbyapp.com</a>, search for the library, tap it, and copy the address from your browser's address bar.</div>
+        <label>Cost (for paid cards)<input type="text" name="fee" placeholder="$50/year"></label>
+        <label>Note<input type="text" name="note" placeholder="e.g. renew every March"></label>
+        <input type="hidden" name="url">
+        <div class="full"><button class="btn">Add library</button></div>
+      </form>
+      <details style="margin-top:16px"><summary class="muted" style="cursor:pointer">Libraries that sell or give cards to out-of-state readers</summary>
+        <p class="meta-line">Checked November 2026 from third-party guides. Fees and rules change, so confirm on the library's own page before paying. Tap "Use" to fill in the form, then paste the library's Libby link.</p>
+        <div class="results">${d.suggestions.map((sg, i) => `<div class="result"><div class="grow"><div class="t">${esc(sg.name)}</div>
+          <div class="muted" style="font-size:13px">${esc(sg.fee)} · ${esc(sg.note)} · <a href="${esc(sg.url)}" target="_blank" rel="noopener">source</a></div></div>
+          <button class="btn quiet" data-sug="${i}">Use</button></div>`).join("")}</div>
+      </details>
+    </div>
+    <div class="card">
+      <h2>Search preferences</h2>
+      <form id="prefForm" class="form-grid">
+        <label>Our home state (for free-card rules)<input type="text" name="home_state" maxlength="2" value="${esc(p.home_state)}" placeholder="NV"></label>
+        <label>Suggest buying when the shortest wait is longer than
+          <select name="wait_ok_days">${[14, 28, 42, 56, 84, 120].map(n => `<option value="${n}" ${p.wait_ok_days === n ? "selected" : ""}>${n / 7} weeks</option>`).join("")}</select></label>
+        <div class="full"><button class="btn quiet">Save</button></div>
+      </form>
+      ${me.is_admin ? `
+      <div class="warn" style="margin-top:16px">
+        <label class="row" style="align-items:flex-start;gap:10px;font-size:15px;flex-wrap:nowrap">
+          <input type="checkbox" id="libbyLookup" ${p.libby_lookup ? "checked" : ""} style="margin-top:4px">
+          <span><b>Check Libby wait times automatically (unofficial)</b><br>
+          <span class="muted" style="font-size:14px">OverDrive (the company behind Libby) only offers its official search API to libraries. This option reads the same public catalog the Libby website uses. It never logs in and sends no card numbers. But <b>it may break OverDrive's terms of service</b>, OverDrive could block it or change it without warning, and it may stop working at any time. It's off by default. If you share this app with others, leave it off unless they choose to turn it on.</span></span>
+        </label>
+      </div>` : ""}
+    </div>`;
+  $("#libs").querySelectorAll("[data-dellib]").forEach(b => b.onclick = async () => {
+    if (!confirm("Remove this library?")) return;
+    try { await api(`/api/libraries/${b.dataset.dellib}`, { method: "DELETE" }); renderLibraries(); } catch (err) { toast(err.message); }
+  });
+  $("#libs").querySelectorAll("[data-sug]").forEach(b => b.onclick = () => {
+    const sg = d.suggestions[+b.dataset.sug], f = $("#libForm");
+    f.name.value = sg.name; f.kind.value = sg.kind; f.fee.value = sg.fee; f.note.value = sg.note; f.url.value = sg.url;
+    f.libby.focus(); f.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+  $("#libForm").onsubmit = async e => {
+    e.preventDefault();
+    try { await api("/api/libraries", { method: "POST", json: Object.fromEntries(new FormData(e.target)) }); toast("Library added"); renderLibraries(); }
+    catch (err) { toast(err.message); }
+  };
+  $("#prefForm").onsubmit = async e => {
+    e.preventDefault(); const f = new FormData(e.target);
+    try { await api("/api/search-prefs", { method: "PUT", json: { home_state: f.get("home_state"), wait_ok_days: +f.get("wait_ok_days") } }); toast("Saved"); }
+    catch (err) { toast(err.message); }
+  };
+  const box = $("#libbyLookup");
+  if (box) box.onchange = async () => {
+    if (box.checked && !confirm("Turn on unofficial Libby lookups?\n\nThis may break OverDrive's terms of service and could stop working at any time. You can turn it off whenever you like.")) { box.checked = false; return; }
+    try { await api("/api/search-prefs", { method: "PUT", json: { libby_lookup: box.checked } }); cfg.libby_lookup = box.checked; lastSearch = null; toast(box.checked ? "Libby lookups on" : "Libby lookups off"); }
+    catch (err) { toast(err.message); box.checked = !box.checked; }
+  };
+}
+
+// ---------------------------------------------------------------- settings: things we own
+async function renderOwned() {
+  const d = await api("/api/owned");
+  const count = src => d.counts.filter(c => c.source === src).reduce((n, c) => n + c.n, 0);
+  $("#owned").innerHTML = `
+    <div class="card">
+      <h2>Books we already own</h2>
+      <p class="muted" style="margin-top:-6px">Upload your Amazon purchase lists so search can say "You own it". Only titles and authors are kept. The books themselves stay with Amazon.</p>
+      <p style="font-size:14px">Kindle books: <b>${count("kindle")}</b> · Audible: <b>${count("audible")}</b> · Other: <b>${count("other")}</b></p>
+      <details><summary class="muted" style="cursor:pointer">How to get your lists from Amazon</summary>
+        <ol class="muted" style="font-size:14px">
+          <li>On amazon.com go to <b>Account → Request Your Information</b> (privacy central) and request your <b>Kindle</b> data. For Audible, request it from Audible's own privacy page.</li>
+          <li>Amazon emails a download link, usually within a few days. Download the ZIP.</li>
+          <li>Upload the ZIP here. The app finds the list of titles inside it. A CSV, or a text file with one "Title by Author" per line, also works.</li>
+        </ol></details>
+      <form id="ownForm" class="row" style="margin-top:10px">
+        <select name="source"><option value="kindle">Kindle books</option><option value="audible">Audible audiobooks</option>
+          <option value="other-ebook">Other ebooks</option><option value="other-audio">Other audiobooks</option></select>
+        <input type="file" name="file" required accept=".zip,.csv,.json,.txt" class="grow">
+        <button class="btn">Import</button>
+      </form>
+      ${me.is_admin && d.counts.length ? `<div class="row" style="margin-top:10px">${["kindle","audible","other"].filter(count).map(src => `<button class="btn quiet" data-clear="${src}">Clear ${src} list</button>`).join("")}</div>` : ""}
+    </div>`;
+  $("#ownForm").onsubmit = async e => {
+    e.preventDefault(); const btn = e.target.querySelector("button"); btn.disabled = true; btn.textContent = "Importing…";
+    try { const r = await api("/api/owned/import", { method: "POST", body: new FormData(e.target) }); toast(`Found ${r.found} titles, added ${r.added} new`); renderOwned(); }
+    catch (err) { toast(err.message); }
+    finally { btn.disabled = false; btn.textContent = "Import"; }
+  };
+  $("#owned").querySelectorAll("[data-clear]").forEach(b => b.onclick = async () => {
+    if (!confirm(`Remove all imported ${b.dataset.clear} titles?`)) return;
+    try { await api(`/api/owned?source=${b.dataset.clear}`, { method: "DELETE" }); renderOwned(); } catch (err) { toast(err.message); }
+  });
 }
 
 async function renderAdmin() {
@@ -581,11 +779,12 @@ async function renderAdmin() {
 let current = "";
 function route() {
   const h = location.hash || "#/";
-  const view = h.startsWith("#/add") ? "add" : h.startsWith("#/audio") ? "audio" : h.startsWith("#/settings") ? "settings" : "shelf";
+  const view = h.startsWith("#/add") ? "add" : h.startsWith("#/settings") ? "settings"
+    : (h.startsWith("#/shelf") || h.startsWith("#/book/")) ? "shelf" : "search";
   document.querySelectorAll("nav a").forEach(a => a.classList.toggle("on", a.dataset.v === view));
   if (view !== current) {
     current = view; $("#view").innerHTML = "";
-    if (view === "add") renderAdd(); else if (view === "audio") renderAudio(); else if (view === "settings") renderSettings(); else renderShelf();
+    if (view === "add") renderAdd(); else if (view === "settings") renderSettings(); else if (view === "shelf") renderShelf(); else renderSearch();
   }
   if (h.startsWith("#/book/")) renderBook(h.slice(7)); else { $("#sheet").innerHTML = ""; editing = false; shown = ""; }
 }

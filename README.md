@@ -2,6 +2,7 @@
 
 A self-hosted home ebook library. Books are stored on your server, and each person can send them straight to their own Kindle.
 
+- **One search box** that checks, in order: books you own (this library, Audiobookshelf, your imported Kindle/Audible purchase lists), free public-domain books and audiobooks, then Libby at your libraries (your cards first, then free cards, then paid cards). Each result shows its best option and the shortest waits, plus buy links when the wait is long.
 - **Bookshelf** with covers, search, sorting, and filters (Reading, Want to read, Finished, Favorites)
 - **Separate logins** for each person, each with their own Kindle email, reading status, and favorites
 - **Send to my Kindle** emails the book to that person's Kindle (Amazon's Send to Kindle), or automatically when it's added
@@ -34,6 +35,13 @@ Each person then enters their Kindle email under **Settings**. In their Amazon a
 As admin, open **Settings → Audiobookshelf** and set **Audiobook folder** to the folder your Audiobookshelf library already watches. Audiobookshelf picks new books up on its own. For new books to appear instantly, also enter the Audiobookshelf address and an API token (Audiobookshelf → Settings → Users → your user). Each download is assembled in a staging folder and moved in only when complete, so Audiobookshelf never sees a half-downloaded book.
 
 If that folder is a network share on another machine, use its UNC path (`\\nas\audiobooks`). The account running Kindle Shelf must be allowed to write there. The built-in SYSTEM account usually can't reach network shares.
+
+### Search, libraries and privacy
+- **Libraries:** add your libraries in **Settings → Libraries for Libby** by pasting each one's libbyapp.com link and choosing "We have a card", "Free card" or "Paid card". No card numbers or Libby logins are stored.
+- **Libby wait times:** by default, search gives one-tap **Check in Libby** links, and Libby itself shows the wait. OverDrive only gives its official API to libraries. An admin can opt in to **automatic wait times** in Settings, which reads Libby's public catalog with no login. **This may break OverDrive's terms of service**, so it is off by default and comes with a warning.
+- **Buying:** prices aren't shown. Amazon's price API needs an active affiliate account, and Amazon forbids scraping, so search shows store links instead.
+- **Owned books:** imported purchase lists keep only titles and authors.
+- **Data:** everything lives in one SQLite file on your server. Search history isn't stored, and outside services only ever receive the search words.
 
 ## Install
 
