@@ -1,20 +1,33 @@
 # Kindle Shelf
 
-A small self-hosted web app that fetches ebooks, converts them for Kindle with Calibre, and gets them onto your device.
+A self-hosted home ebook library. Books are stored on your server, and each person can send them straight to their own Kindle.
 
-**Get books from**
-- Project Gutenberg search (built in)
-- Any direct download link (EPUB, MOBI, AZW3, PDF, FB2, DOCX, TXT, HTML, CBZ…)
-- A file uploaded from your computer
+- **Bookshelf** with covers, search, sorting, and filters (Reading, Want to read, Finished, Favorites)
+- **Separate logins** for each person, each with their own Kindle email, reading status, and favorites
+- **Send to my Kindle** emails the book to that person's Kindle (Amazon's Send to Kindle), or automatically when it's added
+- **Adding books**: search free Project Gutenberg classics, upload files, paste a link, or drop files in the server's **import folder**
+- **Book pages** with description and series, plus editing of titles, authors, and covers (saved into the book files too)
+- **Kindle browser page** at `/kindle`: tap a title on the Kindle to download it directly
 
-**Output**
-- **EPUB**, cleaned up by Calibre for Amazon's *Send to Kindle* (Amazon no longer accepts MOBI)
-- **AZW3**, the native Kindle format, for USB or the Kindle's web browser
+### Where the library lives
+Everything stays on the server:
+```
+data/
+  library/<Author>/<Title>/<Title> - <Author>.epub   (sent to Kindle by email)
+                          /<Title> - <Author>.azw3   (Kindle browser / USB)
+                          /original.<ext>            (the file as it was added)
+                          /cover.jpg
+  import/          drop ebook files here to add them automatically
+  kindle-shelf.db  accounts, reading lists, settings
+```
+Back up the whole `data` folder.
 
-**Get it onto the Kindle**
-1. **Email:** click *Send to Kindle*, or set `AUTO_SEND=true`
-2. **Kindle browser:** open `http://your-server:8080/kindle` in the Kindle's web browser and tap a title. The AZW3 downloads straight to the device.
-3. **USB:** download the AZW3 and copy it into the Kindle's `documents/` folder
+### First login
+If `APP_PASSWORD` is set, an admin account is created from `APP_USER` / `APP_PASSWORD` on first start. Otherwise the first visit asks you to create one. As admin, go to **Settings** to:
+- add other people's accounts
+- set up the email account the library sends from (Gmail works with an app password), then click **Send a test email**
+
+Each person then enters their Kindle email under **Settings**. In their Amazon account, they add the library's sending address to the **Approved Personal Document E-mail List**.
 
 ## Install
 
