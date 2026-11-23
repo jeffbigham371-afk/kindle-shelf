@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kindle Shelf</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --card: #ffffff; --text: #1f1d1a; --muted: #6b665e;
+    --line: #e2ddd3; --accent: #1f6f5c; --accent-text: #fff; --err: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161513; --card: #211f1c; --text: #ece8e1; --muted: #a39d93;
+            --line: #36322d; --accent: #4fb59b; --accent-text: #0d1f1a; --err: #ff8a80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, Segoe UI, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-family: Georgia, serif; font-weight: 600; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+          padding: 16px; margin-bottom: 16px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: 1fr 1fr; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  form { display: flex; gap: 8px; flex-wrap: wrap; }
+  input[type=text], input[type=url] { flex: 1; min-width: 0; padding: 8px 10px;
+    border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+  button, .btn { padding: 8px 12px; border-radius: 6px; border: 1px solid var(--accent);
+    background: var(--accent); color: var(--accent-text); font: inherit; cursor: pointer; text-decoration: none;
+    display: inline-block; white-space: nowrap; }
+  button.ghost, .btn.ghost { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  label.chk { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 14px; width: 100%; }
+  .notice { padding: 10px 12px; border-radius: 6px; border: 1px solid var(--line); color: var(--muted); font-size: 14px; }
+  .results { margin-top: 12px; display: grid; gap: 8px; }
+  .book { display: flex; gap: 12px; align-items: center; padding: 8px; border: 1px solid var(--line); border-radius: 8px; }
+  .book img { width: 40px; height: 60px; object-fit: cover; border-radius: 3px; background: var(--line); flex: none; }
+  .book .meta { flex: 1; min-width: 0; }
+  .book .t { font-weight: 600; overflow-wrap: anywhere; }
+  .book .a { color: var(--muted); font-size: 13px; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+  .status { font-size: 13px; color: var(--muted); }
+  .status.error { color: var(--err); }
+  .pill { font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+  .pill.done { border-color: var(--accent); color: var(--accent); }
+  .pill.error { border-color: var(--err); color: var(--err); }
+  .empty { color: var(--muted); text-align: center; padding: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Kindle Shelf</h1>
+  <p class="sub">Fetch an ebook, convert it for Kindle, and send it to your device.</p>
+  <div id="cfg" class="notice" hidden></div>
+
+  <div class="card">
+    <h2>Search Project Gutenberg</h2>
+    <form id="searchForm">
+      <input type="text" id="q" placeholder="Title or author, e.g. Jane Austen" required>
+      <button>Search</button>
+    </form>
+    <div id="results" class="results"></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Add from a link</h2>
+      <form id="urlForm">
+        <input type="url" id="url" placeholder="https://…/book.epub" required>
+        <button>Add</button>
+        <label class="chk"><input type="checkbox" class="sendChk"> Email to Kindle when ready</label>
+      </form>
+    </div>
+    <div class="card">
+      <h2>Upload a file</h2>
+      <form id="uploadForm">
+        <input type="file" id="file" required accept=".epub,.mobi,.azw,.azw3,.prc,.pdf,.fb2,.txt,.html,.htm,.docx,.rtf,.odt,.lit,.cbz,.cbr,.pdb">
+        <button>Upload</button>
+        <label class="chk"><input type="checkbox" class="sendChk"> Email to Kindle when ready</label>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Library</h2>
+    <div id="jobs" class="results"></div>
+  </div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let cfg = {};
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || r.statusText);
+  return body;
+}
+
+async function loadConfig() {
+  cfg = await api("/api/config");
+  const notes = [];
+  if (!cfg.calibre) notes.push("⚠ Calibre's ebook-convert was not found — conversions will fail.");
+  if (cfg.email_configured) notes.push(`Send to Kindle is set up for <b>${esc(cfg.kindle_email)}</b>.`);
+  else notes.push("Email delivery isn't configured — you can still download files and copy them over USB, or open <b>/kindle</b> in your Kindle's browser.");
+  $("#cfg").innerHTML = notes.join("<br>");
+  $("#cfg").hidden = false;
+  document.querySelectorAll(".sendChk").forEach(c => {
+    c.checked = cfg.auto_send && cfg.email_configured;
+    c.disabled = !cfg.email_configured;
+  });
+}
+
+$("#searchForm").onsubmit = async e => {
+  e.preventDefault();
+  const box = $("#results");
+  box.innerHTML = '<div class="empty">Searching…</div>';
+  try {
+    const data = await api("/api/search?q=" + encodeURIComponent($("#q").value));
+    if (!data.results.length) { box.innerHTML = '<div class="empty">No matches.</div>'; return; }
+    box.innerHTML = data.results.map(b => `
+      <div class="book">
+        ${b.cover ? `<img src="${esc(b.cover)}" alt="" loading="lazy">` : "<img alt=''>"}
+        <div class="meta"><div class="t">${esc(b.title)}</div>
+          <div class="a">${esc(b.authors || "Unknown author")} · ${esc(b.languages.join(", "))}</div></div>
+        <div class="actions">
+          <button ${b.epub ? "" : "disabled"} onclick="addGutenberg(${b.id}, this)">Add</button>
+        </div>
+      </div>`).join("");
+  } catch (err) { box.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+};
+
+async function addGutenberg(id, btn) {
+  btn.disabled = true; btn.textContent = "Added";
+  try {
+    await api("/api/jobs", { method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ gutenberg_id: id, send: cfg.email_configured && cfg.auto_send }) });
+    loadJobs();
+  } catch (err) { alert(err.message); btn.disabled = false; btn.textContent = "Add"; }
+}
+
+$("#urlForm").onsubmit = async e => {
+  e.preventDefault();
+  try {
+    await api("/api/jobs", { method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ url: $("#url").value, send: e.target.querySelector(".sendChk").checked }) });
+    $("#url").value = ""; loadJobs();
+  } catch (err) { alert(err.message); }
+};
+
+$("#uploadForm").onsubmit = async e => {
+  e.preventDefault();
+  const fd = new FormData();
+  fd.append("file", $("#file").files[0]);
+  fd.append("send", e.target.querySelector(".sendChk").checked);
+  const btn = e.target.querySelector("button");
+  btn.disabled = true; btn.textContent = "Uploading…";
+  try { await api("/api/upload", { method: "POST", body: fd }); $("#file").value = ""; loadJobs(); }
+  catch (err) { alert(err.message); }
+  finally { btn.disabled = false; btn.textContent = "Upload"; }
+};
+
+async function sendJob(id, btn) {
+  btn.disabled = true; btn.textContent = "Sending…";
+  try { await api(`/api/jobs/${id}/send`, { method: "POST" }); btn.textContent = "Sent ✓"; loadJobs(); }
+  catch (err) { alert(err.message); btn.disabled = false; btn.textContent = "Send to Kindle"; }
+}
+
+async function deleteJob(id) {
+  if (!confirm("Remove this book and its files?")) return;
+  try { await api(`/api/jobs/${id}`, { method: "DELETE" }); loadJobs(); } catch (err) { alert(err.message); }
+}
+
+async function loadJobs() {
+  const jobs = await api("/api/jobs");
+  const box = $("#jobs");
+  if (!jobs.length) { box.innerHTML = '<div class="empty">No books yet. Search, paste a link, or upload a file.</div>'; return; }
+  box.innerHTML = jobs.map(j => {
+    const busy = ["queued","downloading","converting"].includes(j.status);
+    const dl = Object.keys(j.files).filter(f => f !== "original")
+      .map(f => `<a class="btn ghost" href="/api/jobs/${j.id}/file/${f}">${f.toUpperCase()}</a>`).join("");
+    const send = j.status === "done" && cfg.email_configured
+      ? `<button onclick="sendJob('${j.id}', this)">${j.sent_at ? "Resend" : "Send to Kindle"}</button>` : "";
+    const del = busy ? "" : `<button class="ghost" onclick="deleteJob('${j.id}')">✕</button>`;
+    return `<div class="book">
+      <div class="meta">
+        <div class="t">${esc(j.title || j.source)} <span class="pill ${j.status}">${j.status}</span></div>
+        <div class="a">${esc(j.author || "")}</div>
+        <div class="status ${j.status === "error" ? "error" : ""}">${esc(j.message || "")}${j.sent_at ? " · emailed " + new Date(j.sent_at*1000).toLocaleString() : ""}</div>
+      </div>
+      <div class="actions">${dl}${send}${del}</div></div>`;
+  }).join("");
+}
+
+loadConfig().then(loadJobs);
+setInterval(loadJobs, 3000);
+</script>
+</body>
+</html>
